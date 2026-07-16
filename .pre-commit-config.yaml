@@ -1,0 +1,51 @@
+---
+exclude: |
+  (?x)^(
+      .*cache.*/.*|
+      .*venv.*/.*
+  )$
+fail_fast: true
+default_language_version:
+  python: python3.13
+repos:
+  # ----------------------------- Security ----------------------------------- #
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        name: "Detect hardcoded secrets"
+
+  # ----------------------------- Python ------------------------------------- #
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-format
+        name: "Format with Ruff"
+      - id: ruff
+        name: "Lint with Ruff"
+        args: [--fix, --exit-non-zero-on-fix]
+
+  # ----------------------------- YAML --------------------------------------- #
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        name: "Lint YAML files"
+        args: [-d, relaxed]
+
+  # ----------------------------- Filesystem / Git --------------------------- #
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+        name: "Detect conflict markers"
+      - id: end-of-file-fixer
+        name: "Fix end of file"
+      - id: trailing-whitespace
+        name: "Trim trailing whitespace"
+      - id: check-added-large-files
+        name: "Block large file commits"
+        args: ["--maxkb=5000"]
+      - id: no-commit-to-branch
+        name: "Protect main branch"
+        args: ["--branch", "main"]

@@ -1,0 +1,59 @@
+# Publishes moncpipelib to PyPI via Trusted Publishing (OIDC) -- no API token.
+#
+# Runs in the PUBLIC repo (a non-EMU org). Generated into the public tree by
+# the private export tooling; do not hand-edit in the public repo.
+#
+# One-time PyPI setup (https://pypi.org/manage/project/moncpipelib/settings/publishing/):
+#   Add a Trusted Publisher:
+#     Owner:        model-oncology-public
+#     Repository:   moncpipelib
+#     Workflow:     publish-pypi.yml
+#     Environment:  pypi
+#
+# Release flow: bump the version in the internal repo -> publish the mirror ->
+# create a GitHub Release in the public repo (tag vX.Y.Z) -> this runs and
+# uploads. PyPI rejects re-uploading an existing version, so each publish needs
+# a new version.
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      - name: Build sdist + wheel
+        run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish
+        # NOTE: pin to the COMMIT sha, not the annotated-tag-object sha, or
+        # Actions mis-resolves it to a non-existent ghcr.io image tag.
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
