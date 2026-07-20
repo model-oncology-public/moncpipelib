@@ -89,6 +89,12 @@ def resolve_analyze_after_write(
 
 def _write_changed(stats: dict[str, Any], row_count: int) -> bool:
     """Return True when the write changed the target (or plausibly did)."""
+    # A TRUNCATE emptied the target regardless of what the counters say: it
+    # reports rows_deleted == 0 by construction, so a full refresh that
+    # truncated a populated table and then loaded nothing would otherwise look
+    # unchanged and keep the pre-truncate statistics on an empty table.
+    if stats.get("clear_method") == "truncate":
+        return True
     counters = [stats[k] for k in _CHANGE_STAT_KEYS if isinstance(stats.get(k), int)]
     if counters:
         return any(v > 0 for v in counters)

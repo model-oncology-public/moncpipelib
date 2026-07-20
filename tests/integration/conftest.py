@@ -561,6 +561,21 @@ class TableBuilder:
             cur.execute(f"TRUNCATE {fqn} RESTART IDENTITY CASCADE")
         self._conn.commit()
 
+    def analyze(self, fqn: str) -> None:
+        """ANALYZE a table so ``pg_class.reltuples`` reflects its contents.
+
+        Freshly created tables report ``reltuples = -1`` ("never analyzed"),
+        which the AUTO full-refresh fallback deliberately treats as "no
+        estimate available" rather than "empty" (#4). Seeding rows is
+        therefore not enough on its own to exercise that path.
+        """
+        if self._conn.closed:
+            return
+        self._conn.rollback()
+        with self._conn.cursor() as cur:
+            cur.execute(f"ANALYZE {fqn}")
+        self._conn.commit()
+
 
 @pytest.fixture()
 def table_builder(

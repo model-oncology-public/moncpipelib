@@ -240,8 +240,15 @@ class PostgresResource(ConfigurableResource):
     """
 
     full_refresh_threshold: int = 10_000
-    """Row count threshold for auto full_refresh_method. DataFrames at or above
-    this size use TRUNCATE; smaller DataFrames use DELETE. Defaults to 10,000."""
+    """Row count threshold for auto full_refresh_method. At or above this size
+    the clear uses TRUNCATE; below it, DELETE. Defaults to 10,000.
+
+    Sized on the incoming DataFrame for single-frame writes. Streamed
+    (batched) writes carry no such count -- ``total_rows_hint`` is optional
+    progress metadata -- so they size it on the target's existing
+    ``pg_class.reltuples``, which is the quantity the clear actually has to
+    remove. A target that has never been analyzed yields no estimate and stays
+    on DELETE (#4)."""
 
     insert_chunk_size: int | None = None
     """Process DataFrames in chunks of this size during INSERT.
@@ -3012,6 +3019,13 @@ class PostgresResource(ConfigurableResource):
         contract_summary: ContractValidationSummary | None = None
         last_batch_columns: list[str] = []
 
+        # Full-refresh clear outcome, surfaced in final_stats. ``types.py``
+        # documents ``clear_method`` as part of the returned stats; before #4
+        # the batched path discarded it, which is why the AUTO regression it
+        # fixes was invisible in Dagster metadata.
+        clear_method: str | None = None
+        rows_deleted: int | None = None
+
         # SCD2 batched state
         scd2_stage_table: str | None = None
         scd2_hash_columns: list[str] | None = None
@@ -3220,17 +3234,26 @@ class PostgresResource(ConfigurableResource):
                                 )  # noqa: S608
                                 cursor.execute(delete_sql, partition_values)
                                 deleted_count = cursor.rowcount
+                                rows_deleted = deleted_count
+                                clear_method = "delete_partition"
                                 wctx.log.info(
                                     f"Deleted {deleted_count} rows from {table_name} "
                                     f"for {len(partition_values)} partition value(s)"
                                 )
                             else:
                                 config = self._get_writer_config()
-                                clear_table(
+                                # ``total_rows_hint`` is optional progress
+                                # metadata, so it is usually absent here. Pass
+                                # it through as-is rather than coercing to 0:
+                                # under AUTO, ``clear_table`` reads "unknown"
+                                # as a cue to size the decision from the
+                                # target's own reltuples, whereas 0 would mean
+                                # "no rows" and pin it to DELETE forever (#4).
+                                rows_deleted, clear_method = clear_table(
                                     config,
                                     cursor,
                                     table_name,
-                                    batched.total_rows_hint or 0,
+                                    batched.total_rows_hint,
                                     wctx,
                                 )
 
@@ -3548,6 +3571,19 @@ class PostgresResource(ConfigurableResource):
             conn.close()
 
         final_stats: dict[str, Any] = {"rows_written": total_rows, "batches_written": total_batches}
+        if clear_method is not None:
+            # Mirror the single-DataFrame path's full-refresh stats
+            # (``writers.py`` execute_full_refresh) so ``types.py``'s documented
+            # "rows_deleted, rows_inserted, clear_method" holds on both paths.
+            # ``rows_inserted`` is load-bearing, not decoration: the post-write
+            # ANALYZE gate (``_analyze_helpers._write_changed``) stops falling
+            # back to row_count as soon as ANY change counter is present, so
+            # publishing rows_deleted alone would make every TRUNCATE report
+            # ``[0]`` and silently skip its ANALYZE.
+            final_stats["clear_method"] = clear_method
+            final_stats["rows_inserted"] = total_rows
+            if rows_deleted is not None:
+                final_stats["rows_deleted"] = rows_deleted
         if scd2_stats is not None:
             final_stats.update(scd2_stats)
         # Surface the post-commit ANALYZE action for observability (flows

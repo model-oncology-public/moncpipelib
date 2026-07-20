@@ -63,8 +63,12 @@ class FullRefreshMethod(StrEnum):
     """Method for clearing table in full_refresh mode.
 
     Attributes:
-        AUTO: Choose based on DataFrame size (default). Uses TRUNCATE for large
-            DataFrames (>= threshold), DELETE for smaller ones.
+        AUTO: Choose based on how much data the clear has to remove (default).
+            Uses TRUNCATE at or above the threshold, DELETE below it. The
+            single-DataFrame path sizes this on the incoming frame; the
+            batched path has no such count and sizes it on the target's
+            ``pg_class.reltuples`` instead, falling back to DELETE when the
+            target has never been analyzed (#4).
         DELETE: Always use DELETE. Safer locking (ROW EXCLUSIVE), allows
             concurrent reads, but slower for large tables.
         TRUNCATE: Always use TRUNCATE. Faster (O(1) vs O(n)), but acquires

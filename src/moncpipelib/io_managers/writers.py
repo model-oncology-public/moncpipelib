@@ -73,21 +73,26 @@ class WriterConfig:
     insert_chunk_size: int | None
 
 
-def should_use_truncate(config: WriterConfig, row_count: int) -> bool:
+def should_use_truncate(config: WriterConfig, row_count: int | None) -> bool:
     """Determine whether to use TRUNCATE or DELETE for full refresh.
 
     Args:
         config: Writer configuration.
-        row_count: Number of rows in the incoming DataFrame.
+        row_count: Estimated number of rows the clear will have to remove, or
+            ``None`` when no estimate is available. ``0`` is a real count and
+            is treated as such; only ``None`` means "unknown".
 
     Returns:
-        True if TRUNCATE should be used, False for DELETE.
+        True if TRUNCATE should be used, False for DELETE. Under AUTO an
+        unknown row count resolves to DELETE, the lower-lock option.
     """
     if config.full_refresh_method == FullRefreshMethod.TRUNCATE:
         return True
     elif config.full_refresh_method == FullRefreshMethod.DELETE:
         return False
-    else:  # AUTO - decide based on DataFrame size
+    else:  # AUTO - decide based on how much data the clear has to remove
+        if row_count is None:
+            return False
         return row_count >= config.full_refresh_threshold
 
 
@@ -310,11 +315,41 @@ def insert_with_execute_values(
         return total_inserted
 
 
+def _estimate_existing_rows(cursor: psycopg.Cursor, table_name: str) -> int | None:
+    """Estimate the target's current row count from ``pg_class.reltuples``.
+
+    Used to size the AUTO clear-method decision when the caller has no count
+    to offer (the batched path never does -- see #4). Mirrors the catalog
+    lookup in ``resources/_analyze_helpers.py``, including its treatment of
+    ``reltuples = -1`` as "never analyzed" rather than "empty": every
+    partitioned parent reports -1 until an explicit ANALYZE, and reading that
+    as zero would bias toward the more disruptive lock on exactly the tables
+    where it hurts most.
+
+    Returns ``None`` when no estimate is available (relation absent, or never
+    analyzed), which callers must treat as unknown rather than zero.
+
+    Unlike ``_analyze_helpers``, this runs *inside* the write transaction, so
+    it deliberately does not swallow errors: a failed statement has already
+    aborted the transaction, and suppressing that would only defer the failure
+    to the clear itself. The probe is a plain catalog read, and ``to_regclass``
+    yields NULL (not an error) for a name that does not resolve.
+    """
+    cursor.execute("SELECT reltuples FROM pg_class WHERE oid = to_regclass(%s)", (table_name,))
+    row = cursor.fetchone()
+    if row is None or row[0] is None:
+        return None
+    estimate = float(row[0])
+    if estimate < 0:
+        return None
+    return int(estimate)
+
+
 def clear_table(
     config: WriterConfig,
     cursor: psycopg.Cursor,
     table_name: str,
-    row_count_hint: int,
+    row_count_hint: int | None,
     context: LoggingContext,
 ) -> tuple[int, str]:
     """Clear a table using TRUNCATE or DELETE based on config.
@@ -326,13 +361,19 @@ def clear_table(
         config: Writer configuration.
         cursor: Database cursor.
         table_name: Target table name.
-        row_count_hint: Estimated incoming row count (for auto-selection).
+        row_count_hint: Estimated row count for auto-selection, or ``None`` if
+            the caller has none. Under AUTO an absent hint falls back to the
+            target's ``pg_class.reltuples``; an explicit ``0`` is honoured as a
+            real count and does not trigger that fallback.
         context: Dagster context for logging.
 
     Returns:
         Tuple of (deleted_count, clear_method). deleted_count is 0 for TRUNCATE.
     """
-    use_truncate = should_use_truncate(config, row_count_hint)
+    effective_row_count = row_count_hint
+    if effective_row_count is None and config.full_refresh_method == FullRefreshMethod.AUTO:
+        effective_row_count = _estimate_existing_rows(cursor, table_name)
+    use_truncate = should_use_truncate(config, effective_row_count)
     if use_truncate:
         cursor.execute(f"TRUNCATE {table_name}")  # noqa: S608
         context.log.info(f"Truncated {table_name}")

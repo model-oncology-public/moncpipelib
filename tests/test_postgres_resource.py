@@ -3406,7 +3406,9 @@ class TestLineageMetadataThreadsThroughWrite:
             patch.object(PostgresResource, "_pipeline_registry_upsert_committed"),
             patch(
                 "moncpipelib.io_managers.writers.clear_table",
-                return_value=None,
+                # (deleted_count, clear_method) -- the batched path consumes
+                # this return value since #4 to report the clear in its stats.
+                return_value=(0, "truncate"),
             ),
             patch(
                 "moncpipelib.io_managers.writers.insert_rows",

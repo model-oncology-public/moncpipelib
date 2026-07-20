@@ -18,6 +18,7 @@ import polars as pl
 import pytest
 
 from moncpipelib.io_managers.postgres import PostgresIOManager
+from moncpipelib.streaming import BatchedDataFrame
 
 from .conftest import TableBuilder, make_mock_output_context
 
@@ -233,6 +234,95 @@ class TestFullRefreshTruncate:
 
         meta = ctx.add_output_metadata.call_args[0][0]
         assert meta["clear_method"].value == "truncate"
+
+    def test_auto_batched_without_hint_uses_existing_row_count(self) -> None:
+        """Streamed AUTO sizes the clear on the target, not the incoming frame.
+
+        The batched path has no incoming row count -- ``total_rows_hint`` is
+        optional progress metadata -- so before #4 it passed 0 and AUTO could
+        never reach TRUNCATE at any volume. The decision now falls back to the
+        target's ``pg_class.reltuples``.
+
+        The seeded rows must be ANALYZEd: ``reltuples`` is -1 on a table that
+        has never been analyzed, which is deliberately read as "no estimate"
+        and would assert the DELETE fallback rather than the fix.
+        """
+        io_mgr = self.io_mgr_factory(
+            db_schema="test_write",
+            enable_row_lineage=False,
+            add_metadata_columns=False,
+            full_refresh_method="auto",
+            full_refresh_threshold=3,
+        )
+        # 5 existing rows >= threshold of 3, so the clear should TRUNCATE.
+        self.builder.insert_rows(
+            self.fqn,
+            columns=["id", "name"],
+            rows=[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")],
+        )
+        self.builder.analyze(self.fqn)
+
+        ctx = make_mock_output_context(
+            asset_name=self.TABLE_NAME,
+            metadata={"write_mode": "full_refresh"},
+        )
+        # One small batch, and no total_rows_hint -- the pre-#4 shape.
+        batched = BatchedDataFrame(batches=iter([pl.DataFrame({"id": [10], "name": ["x"]})]))
+        io_mgr.handle_output(ctx, batched)
+
+        assert self.builder.count(self.fqn) == 1
+        meta = ctx.add_output_metadata.call_args[0][0]
+        assert meta["clear_method"].value == "truncate"
+
+    def test_auto_batched_small_existing_table_still_deletes(self) -> None:
+        """The fallback is a real decision, not a blanket switch to TRUNCATE."""
+        io_mgr = self.io_mgr_factory(
+            db_schema="test_write",
+            enable_row_lineage=False,
+            add_metadata_columns=False,
+            full_refresh_method="auto",
+            full_refresh_threshold=100,
+        )
+        self.builder.insert_rows(self.fqn, columns=["id", "name"], rows=[(1, "a"), (2, "b")])
+        self.builder.analyze(self.fqn)
+
+        ctx = make_mock_output_context(
+            asset_name=self.TABLE_NAME,
+            metadata={"write_mode": "full_refresh"},
+        )
+        batched = BatchedDataFrame(batches=iter([pl.DataFrame({"id": [10], "name": ["x"]})]))
+        io_mgr.handle_output(ctx, batched)
+
+        assert self.builder.count(self.fqn) == 1
+        meta = ctx.add_output_metadata.call_args[0][0]
+        assert meta["clear_method"].value == "delete"
+
+    def test_auto_batched_never_analyzed_target_deletes(self) -> None:
+        """``reltuples = -1`` is unknown, not zero -- stay on the safer path."""
+        io_mgr = self.io_mgr_factory(
+            db_schema="test_write",
+            enable_row_lineage=False,
+            add_metadata_columns=False,
+            full_refresh_method="auto",
+            full_refresh_threshold=3,
+        )
+        # Seeded well above the threshold, but deliberately NOT analyzed.
+        self.builder.insert_rows(
+            self.fqn,
+            columns=["id", "name"],
+            rows=[(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")],
+        )
+
+        ctx = make_mock_output_context(
+            asset_name=self.TABLE_NAME,
+            metadata={"write_mode": "full_refresh"},
+        )
+        batched = BatchedDataFrame(batches=iter([pl.DataFrame({"id": [10], "name": ["x"]})]))
+        io_mgr.handle_output(ctx, batched)
+
+        assert self.builder.count(self.fqn) == 1
+        meta = ctx.add_output_metadata.call_args[0][0]
+        assert meta["clear_method"].value == "delete"
 
 
 # ---------------------------------------------------------------------------

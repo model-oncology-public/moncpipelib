@@ -93,6 +93,30 @@ class TestWriteChanged:
     def test_non_int_counters_are_ignored(self) -> None:
         assert _write_changed({"rows_inserted": "n/a"}, row_count=0) is False
 
+    def test_truncate_is_a_change_even_with_zero_counters(self) -> None:
+        """TRUNCATE always reports rows_deleted == 0 by construction.
+
+        A full refresh that truncated a populated table and then loaded
+        nothing has emptied it, so its statistics are stale and it must be
+        analyzed -- the counters alone would read as unchanged (#4).
+        """
+        assert (
+            _write_changed(
+                {"clear_method": "truncate", "rows_inserted": 0, "rows_deleted": 0},
+                row_count=0,
+            )
+            is True
+        )
+
+    def test_delete_clear_still_uses_counters(self) -> None:
+        assert (
+            _write_changed(
+                {"clear_method": "delete", "rows_inserted": 0, "rows_deleted": 0},
+                row_count=0,
+            )
+            is False
+        )
+
 
 class TestAnalyzeAfterWriteGating:
     """Skip paths: never / SCD2 / unchanged / ordinary table under 'partitioned'."""
