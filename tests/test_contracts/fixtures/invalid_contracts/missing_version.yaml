@@ -1,0 +1,9 @@
+---
+asset: test_asset
+layer: bronze
+
+schema:
+  columns:
+    - name: id
+      type: integer
+      nullable: false

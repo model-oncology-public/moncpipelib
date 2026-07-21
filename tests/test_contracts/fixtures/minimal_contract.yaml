@@ -1,0 +1,14 @@
+---
+version: "1.0"
+pipeline_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+asset: simple_asset
+layer: bronze
+
+schema:
+  columns:
+    - name: id
+      type: integer
+      nullable: false
+    - name: value
+      type: string
+      nullable: true
