@@ -1,0 +1,21 @@
+---
+version: "1.0"
+pipeline_id: "550e8400-e29b-41d4-a716-446655440000"
+asset: tagged_asset
+layer: silver
+description: Asset with user-defined tags
+
+owner:
+  team: data-engineering
+
+schema:
+  columns:
+    - name: id
+      type: integer
+      nullable: false
+      primary_key: true
+
+tags:
+  team/priority: high
+  oncall/pager: "true"
+  data_classification: internal
