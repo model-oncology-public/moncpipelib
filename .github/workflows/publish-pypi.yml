@@ -3,22 +3,31 @@
 # Runs in the PUBLIC repo (a non-EMU org). Generated into the public tree by
 # the private export tooling; do not hand-edit in the public repo.
 #
+# Invoked two ways:
+#   * automatically by release.yml (workflow_call) right after it cuts a Release
+#     for a newly-mirrored version, and
+#   * directly on `release: published` or manual `workflow_dispatch`.
+#
 # One-time PyPI setup (https://pypi.org/manage/project/moncpipelib/settings/publishing/):
 #   Add a Trusted Publisher:
 #     Owner:        model-oncology-public
 #     Repository:   moncpipelib
-#     Workflow:     publish-pypi.yml
+#     Workflow:     publish-pypi.yml   # the reusable file below; matched via job_workflow_ref
 #     Environment:  pypi
 #
-# Release flow: bump the version in the internal repo -> publish the mirror ->
-# create a GitHub Release in the public repo (tag vX.Y.Z) -> this runs and
-# uploads. PyPI rejects re-uploading an existing version, so each publish needs
-# a new version.
+# PyPI rejects re-uploading an existing version, so each publish needs a new
+# version (bumped in the internal repo, carried over by the mirror).
 name: Publish to PyPI
 
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref (tag) to build and publish.
+        required: false
+        type: string
   workflow_dispatch:
 
 permissions:
@@ -30,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:

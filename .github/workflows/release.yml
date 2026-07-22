@@ -1,0 +1,78 @@
+# Cuts a GitHub Release -- and, via publish-pypi.yml, a PyPI release -- whenever a
+# mirror sync force-pushes a new version to main and CI passes.
+#
+# Generated into the public tree by the private export tooling; do not hand-edit
+# in the public repo (re-generate from the private export tooling instead).
+#
+# Flow: export.py force-pushes main with a bumped pyproject.toml version -> CI runs
+# -> on CI success this creates Release vX.Y.Z (only if that tag does not already
+# exist) -> it calls publish-pypi.yml to build and publish that tag to PyPI. So the
+# GitHub Release and the PyPI release mirror each other and both fall out of the
+# upstream mirror run. Non-version-bump syncs are no-ops (tag already exists).
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch: # manual: backfill or verify the release -> publish chain
+
+permissions:
+  contents: read
+
+jobs:
+  tag-and-release:
+    name: Create GitHub Release for new version
+    # Manual dispatch, or a successful CI run for a push to main.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag + GitHub Release
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Read package version
+        id: version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release if this version is new
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Pass interpolated values through env, not into the shell body, so the
+          # step stays injection-safe if the trust boundary around these ever changes.
+          VERSION: ${{ steps.version.outputs.version }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          tag="v${VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists -- skipping."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$TARGET_SHA" \
+              --title "$tag" \
+              --generate-notes
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    name: Publish to PyPI
+    needs: tag-and-release
+    if: needs.tag-and-release.outputs.released == 'true'
+    permissions:
+      contents: read
+      id-token: write # OIDC, passed through to the reusable workflow
+    uses: ./.github/workflows/publish-pypi.yml
+    with:
+      ref: v${{ needs.tag-and-release.outputs.version }}
