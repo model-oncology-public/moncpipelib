@@ -1,0 +1,30 @@
+---
+site_name: Pipeline Library (moncpipelib)
+docs_dir: docs
+
+validation:
+  links:
+    absolute_links: ignore
+    unrecognized_links: ignore
+    not_found: warn
+
+nav:
+  - Best Practices: best-practices.md
+  - Cookbook: cookbook.md
+  - Data Contracts Spec: data-contracts-spec.md
+  - Lineage Tracking: lineage-tracking.md
+  - OpenLineage Integration: openlineage-integration-spec.md
+  - SCD2 Guide: scd2-guide.md
+  - UUID Handling: uuid_handling.md
+  - Security: security.md
+  - Migrations:
+      - PostgreSQL Best Practices: migrations/20260120_postgres-best-practices.md
+      - Polars Best Practices: migrations/20260120_polars-best-practices.md
+      - Standards Compliance: migrations/20260215_standards-compliance.md
+      - SCD2 Support: migrations/20260226_scd2-support.md
+      - Pipeline ID and TIMESTAMPTZ: migrations/20260228_pipeline-id-and-timestamptz.md
+      - Universal IO Manager: migrations/20260301_universal-io-manager.md
+      - Resource Write Migration: migrations/20260303_resource-write-migration.md
+  - Release Notes:
+      - v0.32.0 (psycopg3 migration): whats-new-summaries/v0.32.0.md
+      - v0.7.0 to v0.11.3: whats-new-summaries/v0.7.0-to-v0.11.3.md

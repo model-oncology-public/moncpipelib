@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/model-oncology-public/moncpipelib/tree/main/schemas/openlineage/1-0-0/ColumnClassificationFacet.json",
+  "title": "ColumnClassificationFacet",
+  "description": "Custom OpenLineage facet for column-level PII / PHI classification",
+  "type": "object",
+  "properties": {
+    "_producer": {
+      "type": "string",
+      "description": "URI identifying the producer of this facet"
+    },
+    "_schemaURL": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the JSON schema for this facet"
+    },
+    "pii_columns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Column names classified as PII (personally identifiable information)"
+    },
+    "phi_columns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Column names classified as PHI (protected health information under HIPAA). Defaults to the pii classification when a contract does not annotate phi explicitly."
+    }
+  },
+  "required": ["_schemaURL", "pii_columns"],
+  "additionalProperties": false
+}
