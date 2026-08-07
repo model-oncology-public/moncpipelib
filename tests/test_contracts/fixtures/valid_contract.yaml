@@ -1,0 +1,111 @@
+---
+version: "1.0"
+pipeline_id: "550e8400-e29b-41d4-a716-446655440000"
+asset: claims_bronze
+layer: bronze
+description: |
+  Raw claims data ingested from SFTP.
+  Contains one row per claim submission.
+
+owner:
+  team: data-engineering
+  contact: data-platform@modeloncology.com
+  slack_channel: "#data-platform-alerts"
+
+schema:
+  strict: false
+  columns:
+    - name: claim_id
+      type: string
+      nullable: false
+      primary_key: true
+      description: Unique claim identifier from source system
+      tests:
+        - not_null
+        - unique
+
+    - name: patient_id
+      type: string
+      nullable: false
+      description: Patient identifier (FK to patients table)
+      tests:
+        - not_null
+        - pattern: "^PAT-[0-9]{8}$"
+
+    - name: amount
+      type: decimal
+      nullable: true
+      description: Claim amount in USD
+      tests:
+        - greater_than: 0
+          severity: warn
+        - less_than: 1000000
+          severity: error
+
+    - name: claim_date
+      type: date
+      nullable: false
+      tests:
+        - not_null
+        - not_in_future
+        - within_days: 365
+
+    - name: status
+      type: string
+      nullable: false
+      tests:
+        - not_null
+        - accepted_values:
+            values: ["pending", "approved", "denied", "appealed"]
+          severity: error
+
+    - name: diagnosis_code
+      type: string
+      nullable: true
+      tests:
+        - pattern: "^[A-Z][0-9]{2}(\\.[0-9]{1,2})?$"
+          when: not_null
+          severity: warn
+
+    - name: _lineage_id
+      type: uuid
+      nullable: false
+      description: moncpipelib lineage tracking (auto-added)
+      managed: true
+
+    - name: _lineage_key
+      type: string
+      nullable: false
+      description: moncpipelib lineage key (auto-added)
+      managed: true
+
+expectations:
+  - row_count:
+      min: 1
+      max: 10000000
+    severity: error
+
+  - freshness:
+      column: claim_date
+      max_age_hours: 48
+    severity: warn
+
+  - null_percentage:
+      column: diagnosis_code
+      max_percent: 10
+    severity: warn
+
+  - unique_combination:
+      columns: [claim_id, claim_date]
+    severity: error
+
+upstream:
+  - name: sftp_claims_file
+    type: external
+    system: sftp
+    description: Daily claims file from clearinghouse
+
+sla:
+  freshness_hours: 24
+  update_frequency: daily
+  availability_percent: 99.9

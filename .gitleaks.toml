@@ -1,0 +1,99 @@
+# gitleaks configuration for the PUBLIC moncpipelib repository.
+#
+# This ships into the public tree as `.gitleaks.toml` and is run by the public
+# CI on every push/PR. It is the ongoing "suspenders" -- the export-time
+# scan.py is the "belt". Keep the custom rules here in sync with
+# scripts/oss-export/scan.py in the private repo.
+
+title = "moncpipelib leak-scan config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "mo-azure-cus-resource"
+description = "Internal Azure resource name (-cus-npe/prd/prod)"
+regex = '''\b[a-z][a-z0-9]*-cus-(npe|prd|prod)\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-pg-flex-server"
+description = "Internal Postgres flexible server name"
+regex = '''\bsrv-psgrsdb[\w-]*\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-storage-account"
+description = "Internal Azure storage account name"
+regex = '''\bstadatalake[\w-]*\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-internal-db-name"
+description = "Internal database name"
+regex = '''\boncalytics\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-employee-handle"
+description = "Employee handle"
+regex = '''\bahaight[\w-]*\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-internal-email-domain"
+description = "Internal email domain"
+regex = '''\boncologyhealthpartners\.com\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-azure-pg-fqdn"
+description = "Azure Postgres FQDN"
+regex = '''\b[a-z0-9-]+\.postgres\.database\.azure\.com\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-azure-sql-fqdn"
+description = "Azure SQL FQDN"
+regex = '''\b[a-z0-9-]+\.database\.windows\.net\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-azure-storage-fqdn"
+description = "Azure storage FQDN (blob/dfs/file/queue/table)"
+regex = '''\b[a-z0-9]+\.(?:blob|dfs|file|queue|table)\.core\.windows\.net\b'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-azure-artifacts-feed"
+description = "Internal Azure Artifacts package feed"
+regex = '''\bpkgs\.dev\.azure\.com\b'''
+tags = ["internal", "model-oncology"]
+
+# Detect a subscription GUID by CONTEXT rather than embedding the real values
+# (this file is public). The precise known-ID check lives in the private
+# export-time scanner (scripts/oss-export/scan.py), which is never published.
+[[rules]]
+id = "mo-azure-subscription"
+description = "Azure subscription id appearing in a subscription context"
+regex = '''(?i)subscription["'\s:=/_-]+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'''
+tags = ["internal", "model-oncology"]
+
+[[rules]]
+id = "mo-azure-id-context"
+description = "Azure tenant/client/object/app id appearing in context"
+regex = '''(?i)\b(?:tenant|client[_-]?id|object[_-]?id|app[_-]?id)\b["'\s:=/_-]+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'''
+tags = ["internal", "model-oncology"]
+
+[allowlist]
+description = "Known-safe placeholders and synthetic example values"
+# Match allowlist regexes against the full match (not the capture/secret), so
+# placeholder hosts like examplestorageacct.dfs.core.windows.net are suppressed.
+regexTarget = "match"
+regexes = [
+  '''example\.com''',
+  '''examplestorageacct''',
+  '''\bpg-(nonprod|prod)\b''',
+  '''\blaw-(nonprod|prod)\b''',
+  '''\bbench_user\b''',
+]
