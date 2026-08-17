@@ -1,0 +1,25 @@
+---
+site_name: Pipeline Library (moncpipelib)
+repo_url: https://github.com/model-oncology-public/moncpipelib
+docs_dir: docs
+
+validation:
+  links:
+    absolute_links: ignore
+    unrecognized_links: ignore
+    not_found: warn
+
+nav:
+  - index.md
+  - Best Practices: best-practices.md
+  - Cookbook: cookbook.md
+  - Data Contracts Spec: data-contracts-spec.md
+  - Lineage Tracking: lineage-tracking.md
+  - OpenLineage Integration: openlineage-integration-spec.md
+  - SCD2 Guide: scd2-guide.md
+  - UUID Handling: uuid_handling.md
+  - Security: security.md
+  - migrations/index.md
+  - Release Notes:
+      - v0.32.0 (psycopg3 migration): whats-new-summaries/v0.32.0.md
+      - v0.7.0 to v0.11.3: whats-new-summaries/v0.7.0-to-v0.11.3.md

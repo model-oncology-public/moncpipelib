@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/model-oncology-public/moncpipelib/tree/main/schemas/openlineage/1-0-0/DataPartitionFacet.json",
+  "title": "DataPartitionFacet",
+  "description": "Custom OpenLineage facet for data partition information",
+  "type": "object",
+  "properties": {
+    "_producer": {
+      "type": "string",
+      "description": "URI identifying the producer of this facet"
+    },
+    "_schemaURL": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the JSON schema for this facet"
+    },
+    "data_date": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Single data date for this partition (ISO 8601 format)"
+    },
+    "data_date_start": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Start date for date range partitions (ISO 8601 format)"
+    },
+    "data_date_end": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "End date for date range partitions (ISO 8601 format)"
+    },
+    "partition_column": {
+      "type": ["string", "null"],
+      "description": "Name of the column used for partitioning"
+    }
+  },
+  "required": ["_schemaURL"],
+  "additionalProperties": false
+}
