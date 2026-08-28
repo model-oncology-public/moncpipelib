@@ -1,0 +1,110 @@
+# Publishes moncpipelib to PyPI via Trusted Publishing (OIDC) -- no API token.
+#
+# Runs in the PUBLIC repo (a non-EMU org). Generated into the public tree by
+# the private export tooling; do not hand-edit in the public repo.
+#
+# One-time PyPI setup (https://pypi.org/manage/project/moncpipelib/settings/publishing/):
+#   Add a Trusted Publisher:
+#     Owner:        model-oncology-public
+#     Repository:   moncpipelib
+#     Workflow:     publish-pypi.yml
+#     Environment:  pypi
+#
+# Invocation paths:
+#   1. release: published -- kept for manually-created GitHub Releases.
+#   2. workflow_dispatch -- manual publish, and the recovery path when an
+#      automated publish fails after its Release was already created.
+#      This block states MECHANISM, not a procedure. The outcome of any
+#      recovery depends on three independently-chosen refs -- the one given
+#      to this workflow, the one release.yml sees, and the one the mirror
+#      export ran from -- and a procedure written for one combination has
+#      repeatedly turned out to be wrong in another. Establish the state you
+#      are actually in, then derive the route.
+#        - A dispatch runs the workflow file AS IT EXISTS AT THE CHOSEN REF.
+#          So if the publish failed inside THIS file, the tag still carries
+#          the broken copy and a dispatch on that tag only repeats it.
+#        - The build job checks out that same ref (bare `actions/checkout`),
+#          so the ref also decides WHICH VERSION is built. release.yml reads
+#          its version the same way, from its own checked-out ref's
+#          pyproject.toml. No route publishes a version other than the one in
+#          the ref it was given.
+#        - release.yml's tag guard is skip-if-exists: when the tag derived
+#          from that version already exists it sets released=false, the
+#          dispatch step (gated on released=='true') never runs, and the run
+#          FINISHES GREEN having published nothing.
+#        - Deleting a tag and its Release is irreversible and by itself
+#          publishes nothing. Do it only after establishing which ref
+#          release.yml will re-cut from and which version that ref carries.
+#        - The mirror export (publish-public-mirror.yml) is itself a
+#          workflow_dispatch on an operator-chosen ref, and export.py takes
+#          the version from that ref's tree. A ref carrying an older version
+#          together with a newer template fix can therefore be constructed
+#          if one is needed.
+#        - Publishing from `main` attests a SHA that no tag or Release points
+#          at, and that the exporter's next force-push makes unreachable. A
+#          tag pins the built commit; `main` does not.
+#        - Every manual route bypasses the CI-success precondition that gates
+#          the automated path, and nothing re-checks it. Confirm CI is green
+#          on the commit being published.
+#      (2026-08: 0.46.1 and 0.46.2 both failed to publish inside this
+#      workflow and were left unpublished.)
+#   3. Auto-dispatched by release.yml (`gh workflow run publish-pypi.yml
+#      --ref vX.Y.Z`) right after it cuts a Release for a newly mirrored
+#      version. release.yml dispatches this workflow instead of calling it as a
+#      reusable workflow because PEP 740 attestations bind the top-level
+#      workflow identity (pypa/gh-action-pypi-publish#283).
+#
+# Release flow: version bumped in the internal repo -> mirror sync force-pushes
+# main -> CI passes -> release.yml cuts Release vX.Y.Z and dispatches this
+# workflow on that tag. PyPI rejects re-uploading an existing version, so each
+# publish needs a new version.
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      - name: Build sdist + wheel
+        run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish
+        # NOTE: pin to the COMMIT sha, not the annotated-tag-object sha, or
+        # Actions mis-resolves it to a non-existent ghcr.io image tag.
+        #
+        # Floor is v1.14.2: it is the first release bundling twine 7 /
+        # packaging 26, which are required to accept the core-metadata 2.5 that
+        # current hatchling emits. v1.14.0 and v1.14.1 bundle twine 6.1.0 and
+        # fail this step with "InvalidDistribution: '2.5' is not a valid
+        # metadata version" -- silently, since release.yml does not observe the
+        # dispatched run's outcome. Do not pin below v1.14.2.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
