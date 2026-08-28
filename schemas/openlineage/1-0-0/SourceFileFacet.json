@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/model-oncology-public/moncpipelib/tree/main/schemas/openlineage/1-0-0/SourceFileFacet.json",
+  "title": "SourceFileFacet",
+  "description": "Custom OpenLineage facet for source file information",
+  "type": "object",
+  "properties": {
+    "_producer": {
+      "type": "string",
+      "description": "URI identifying the producer of this facet"
+    },
+    "_schemaURL": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the JSON schema for this facet"
+    },
+    "source_file": {
+      "type": "string",
+      "description": "Path or name of the source file"
+    },
+    "source_system": {
+      "type": ["string", "null"],
+      "description": "External system the file came from (e.g., 'sftp', 'api', 'blob')"
+    },
+    "file_format": {
+      "type": ["string", "null"],
+      "description": "File format (e.g., 'csv', 'parquet', 'json')"
+    },
+    "file_size_bytes": {
+      "type": ["integer", "null"],
+      "description": "Size of the source file in bytes"
+    }
+  },
+  "required": ["_schemaURL", "source_file"],
+  "additionalProperties": false
+}

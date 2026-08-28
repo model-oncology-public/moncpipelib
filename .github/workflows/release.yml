@@ -1,0 +1,151 @@
+# Cuts a GitHub Release -- and, via a dispatched run of publish-pypi.yml, a PyPI
+# release -- whenever a mirror sync force-pushes a new version to main and CI
+# passes.
+#
+# Runs in the PUBLIC repo (a non-EMU org). Generated into the public tree by
+# scripts/oss-export/export.py; do not hand-edit in the public repo (edit the
+# template in the private repo and re-export instead).
+#
+# NOTE: this is NOT the private repo's .github/workflows/release.yml (internal
+# version bump + tag + internal-feed publish). This file is the public mirror's
+# release automation.
+#
+# Flow: a mirror sync force-pushes main with a bumped pyproject.toml version ->
+# CI runs (the workflow named "CI" -- must match name: in ci.yml; keep the two
+# templates in sync) -> on CI success this creates Release vX.Y.Z (only if that
+# tag does not already exist) -> it dispatches publish-pypi.yml on that tag to
+# build and publish to PyPI. Non-version-bump syncs are no-ops (tag exists).
+#
+# Why dispatch-chaining instead of calling publish-pypi.yml as a reusable
+# workflow: PyPI's PEP 740 attestation verification binds the TOP-LEVEL workflow
+# identity, so a workflow_call publish is rejected by PyPI even though the OIDC
+# token exchange succeeds (pypa/gh-action-pypi-publish#283, closed not-planned).
+# A workflow_dispatch run of publish-pypi.yml is top-level, so the existing
+# Trusted Publisher and attestations work unchanged. workflow_dispatch is one of
+# the two documented exceptions to "GITHUB_TOKEN events do not trigger
+# workflows".
+#
+# Bootstrap caveat: a workflow_run listener does not fire for the push that
+# first adds it. After the sync that introduces this file, run this workflow
+# once manually (workflow_dispatch) to backfill the current version; automation
+# takes over from the next sync.
+#
+# Contributed by @veyloris (public PR model-oncology-public/moncpipelib#8);
+# ported into the private export tooling, with review fixes, so it survives
+# mirror force-pushes.
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    # Event-level filter on the triggering run's head branch: avoids creating a
+    # skipped run for every community-PR CI completion.
+    branches: [main]
+  workflow_dispatch: # manual: first-sync bootstrap/backfill, or re-verify the chain
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+  # The platform keeps ONE pending run per group (newest wins), so 3+ syncs
+  # overlapping within a single run's lifetime would skip the middle version.
+  # Accepted: manual, minutes-apart syncs make that effectively unreachable,
+  # and it matches the existing "versions superseded between syncs are never
+  # published" semantic. (`queue: max` would retain all queued runs; adopt it
+  # once actionlint recognizes the key.)
+
+jobs:
+  tag-and-release:
+    name: Create GitHub Release and dispatch PyPI publish
+    # Manual dispatch, or a successful CI run for a push to main. The branches
+    # filter above already narrows to head_branch == main; the event check here
+    # still excludes a fork PR whose head branch is literally named "main".
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag + GitHub Release
+      actions: write # dispatch publish-pypi.yml for the new tag
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Read package version
+        id: version
+        # ubuntu-latest system python3 is >= 3.11, which ships tomllib. If
+        # runs-on ever changes (older images ship 3.10), provision an
+        # interpreter first like ci.yml does.
+        # Sibling reader of this field: project_version() in scripts/oss-export/export.py.
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release if this version is new
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Pass interpolated values through env, not into the shell body, so
+          # the step stays injection-safe if the trust boundary around these
+          # ever changes.
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # VERSION must be PEP 440-normalized (the private release process only
+          # produces plain X.Y.Z, and export-time validation in
+          # scripts/oss-export/export.py enforces it); a non-normalized string
+          # would make the git tag and the version uv build stamps on the wheel
+          # disagree.
+          tag="v${VERSION}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          # Tag-existence guard (idempotency): query the git tag ref itself,
+          # not the Release, so a pre-existing tag is never re-targeted
+          # (gh release create silently reuses an existing tag and ignores
+          # --target). Distinguish "tag absent" (HTTP 404 -> create) from
+          # transient API failures (anything else -> fail loudly).
+          if out=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" 2>&1); then
+            echo "Tag ${tag} already exists -- skipping (no re-release, no re-target)."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          elif echo "$out" | grep -q "HTTP 404"; then
+            target_sha=$(git rev-parse HEAD)
+            # Static notes: --generate-notes derives content from merged PRs,
+            # and this snapshot mirror has none, so it would produce an empty
+            # body.
+            notes=$(printf '%s\n' \
+              "Snapshot release of the public mirror: moncpipelib ${VERSION}." \
+              "" \
+              "Install:" \
+              "" \
+              "    pip install moncpipelib==${VERSION}" \
+              "" \
+              "This repository is a generated one-way mirror of an internal repository;" \
+              "release notes are not derived from commit history. See" \
+              "docs/whats-new-summaries/ in the repository tree for change summaries.")
+            gh release create "$tag" --target "$target_sha" --notes "$notes"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Failed to query release ${tag}: ${out}" >&2
+            exit 1
+          fi
+      - name: Dispatch PyPI publish for the new tag
+        if: steps.release.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          # Wait (read-only) for the just-created tag ref to be visible, then
+          # dispatch exactly once. Retrying the dispatch itself could
+          # double-dispatch on an ambiguous failure; polling a GET cannot.
+          # If this step still fails: re-running this workflow will NOT
+          # re-dispatch (the tag now exists, so the guard skips) -- recover
+          # with a direct: gh workflow run publish-pypi.yml --ref <tag>
+          for i in 1 2 3; do
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1 && break
+            echo "Tag ${TAG} not visible yet (attempt ${i}); retrying in 5s..."
+            sleep 5
+          done
+          gh workflow run publish-pypi.yml --ref "$TAG"
+          echo "Dispatched publish-pypi.yml on ${TAG}: https://github.com/${GITHUB_REPOSITORY}/actions/workflows/publish-pypi.yml" >> "$GITHUB_STEP_SUMMARY"
