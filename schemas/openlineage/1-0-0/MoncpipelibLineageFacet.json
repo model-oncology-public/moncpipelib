@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/model-oncology-public/moncpipelib/tree/main/schemas/openlineage/1-0-0/MoncpipelibLineageFacet.json",
+  "title": "MoncpipelibLineageFacet",
+  "description": "Custom OpenLineage facet for moncpipelib row-level lineage metadata",
+  "type": "object",
+  "properties": {
+    "_producer": {
+      "type": "string",
+      "description": "URI identifying the producer of this facet"
+    },
+    "_schemaURL": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the JSON schema for this facet"
+    },
+    "lineage_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID7 lineage identifier from moncpipelib lineage tracking"
+    },
+    "lineage_key": {
+      "type": "string",
+      "description": "Human-readable composite lineage key (format: v1:{asset}:{layer}:{date}:{run_id})"
+    },
+    "layer": {
+      "type": "string",
+      "enum": ["bronze", "silver", "gold"],
+      "description": "Data layer in the medallion architecture"
+    },
+    "is_backfill": {
+      "type": "boolean",
+      "description": "Whether this run is a backfill of historical data"
+    },
+    "backfill_reason": {
+      "type": ["string", "null"],
+      "description": "Explanation for why this backfill was performed"
+    },
+    "replaces_lineage_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "UUID of the lineage record this run replaces (for backfills)"
+    },
+    "parent_lineage_ids": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "description": "Lineage IDs of parent records (for aggregations/joins)"
+    },
+    "transformation_type": {
+      "type": ["string", "null"],
+      "description": "Type of transformation performed (e.g., 'aggregate', 'join', 'filter')"
+    },
+    "pipeline_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Stable UUID identifying the logical pipeline (persists across asset renames)"
+    }
+  },
+  "required": ["_schemaURL", "lineage_id", "lineage_key", "layer", "is_backfill"],
+  "additionalProperties": false
+}
